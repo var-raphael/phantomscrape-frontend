@@ -1,3 +1,5 @@
+import { supabase } from "@/lib/supabase"
+
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL
 
 export async function scrapeSingle(url: string, throttle: number, format: string) {
