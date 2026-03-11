@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 
 const links = [
   { href: "/", label: "Dashboard" },
@@ -10,114 +11,69 @@ const links = [
 
 export default function Nav() {
   const pathname = usePathname();
+  const [open, setOpen] = useState(false);
 
   return (
-    <nav className="nav">
-      <div className="nav-brand">
-        <span className="brand-icon">⬡</span>
-        <span className="brand-name">Phantom<span className="brand-accent">Scrape</span></span>
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-[#0a0a0a]/90 backdrop-blur border-b border-emerald-900/20">
+      <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
+        {/* Brand */}
+        <Link href="/" className="flex items-center gap-2 font-mono text-sm text-white">
+          <span className="text-emerald-400 text-lg">⬡</span>
+          <span>Phantom<span className="text-emerald-400">Scrape</span></span>
+        </Link>
+
+        {/* Desktop links */}
+        <ul className="hidden md:flex items-center gap-1">
+          {links.map((link) => (
+            <li key={link.href}>
+              <Link
+                href={link.href}
+                className={`px-3 py-1.5 rounded font-mono text-xs uppercase tracking-widest transition-colors ${
+                  pathname === link.href
+                    ? "text-emerald-400 bg-emerald-400/10"
+                    : "text-gray-500 hover:text-emerald-400 hover:bg-emerald-400/5"
+                }`}
+              >
+                {link.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+
+        {/* Status + hamburger */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#10b981] animate-pulse" />
+            <span className="font-mono text-[10px] text-emerald-400 uppercase tracking-widest hidden sm:block">idle</span>
+          </div>
+          <button
+            className="md:hidden text-gray-400 hover:text-white"
+            onClick={() => setOpen(!open)}
+          >
+            {open ? "✕" : "☰"}
+          </button>
+        </div>
       </div>
-      <ul className="nav-links">
-        {links.map((link) => (
-          <li key={link.href}>
+
+      {/* Mobile menu */}
+      {open && (
+        <div className="md:hidden bg-[#111] border-t border-emerald-900/20 px-4 py-3 flex flex-col gap-1">
+          {links.map((link) => (
             <Link
+              key={link.href}
               href={link.href}
-              className={`nav-link ${pathname === link.href ? "active" : ""}`}
+              onClick={() => setOpen(false)}
+              className={`px-3 py-2 rounded font-mono text-xs uppercase tracking-widest transition-colors ${
+                pathname === link.href
+                  ? "text-emerald-400 bg-emerald-400/10"
+                  : "text-gray-500 hover:text-emerald-400"
+              }`}
             >
               {link.label}
             </Link>
-          </li>
-        ))}
-      </ul>
-      <div className="nav-status">
-        <span className="status-dot" />
-        <span className="status-text">idle</span>
-      </div>
-
-      <style jsx>{`
-        .nav {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          z-index: 100;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 2rem;
-          height: 60px;
-          background: rgba(10, 10, 10, 0.85);
-          backdrop-filter: blur(12px);
-          border-bottom: 1px solid rgba(16, 185, 129, 0.12);
-        }
-        .nav-brand {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          font-family: 'DM Mono', monospace;
-          font-size: 1rem;
-          color: #f0fdf4;
-          letter-spacing: -0.02em;
-        }
-        .brand-icon {
-          color: #10b981;
-          font-size: 1.2rem;
-        }
-        .brand-accent {
-          color: #10b981;
-        }
-        .nav-links {
-          display: flex;
-          list-style: none;
-          gap: 0.25rem;
-          margin: 0;
-          padding: 0;
-        }
-        .nav-link {
-          display: block;
-          padding: 0.4rem 0.9rem;
-          font-family: 'DM Mono', monospace;
-          font-size: 0.78rem;
-          color: #6b7280;
-          text-decoration: none;
-          border-radius: 4px;
-          letter-spacing: 0.04em;
-          text-transform: uppercase;
-          transition: color 0.2s, background 0.2s;
-        }
-        .nav-link:hover {
-          color: #10b981;
-          background: rgba(16, 185, 129, 0.06);
-        }
-        .nav-link.active {
-          color: #10b981;
-          background: rgba(16, 185, 129, 0.1);
-        }
-        .nav-status {
-          display: flex;
-          align-items: center;
-          gap: 0.4rem;
-        }
-        .status-dot {
-          width: 7px;
-          height: 7px;
-          border-radius: 50%;
-          background: #10b981;
-          box-shadow: 0 0 6px #10b981;
-          animation: pulse 2s infinite;
-        }
-        .status-text {
-          font-family: 'DM Mono', monospace;
-          font-size: 0.72rem;
-          color: #10b981;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-        }
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-      `}</style>
+          ))}
+        </div>
+      )}
     </nav>
   );
 }

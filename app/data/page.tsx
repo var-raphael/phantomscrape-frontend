@@ -1,374 +1,251 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 
 const FORMATS = ["JSON", "CSV", "XML", "HTML", "TXT"];
+const FILTERS = ["All", "JSON", "CSV", "XML", "HTML", "TXT"];
 
 type Result = {
   id: string;
+  job_id: string;
   url: string;
-  scrapedAt: string;
-  items: number;
-  format: string;
-  summary: string;
+  title: string;
+  links: string[];
+  cleaned: string;
+  success: boolean;
+  created_at: string;
 };
 
-const MOCK_RESULTS: Result[] = [
-  { id: "r_01", url: "https://news.ycombinator.com", scrapedAt: "Today, 14:02", items: 30, format: "JSON", summary: "Top HN stories — titles, scores, authors, comment counts extracted and normalized." },
-  { id: "r_02", url: "https://lobste.rs", scrapedAt: "Today, 13:48", items: 25, format: "CSV", summary: "Tech news links with tags, upvote counts, and submission timestamps." },
-  { id: "r_03", url: "https://github.com/trending", scrapedAt: "Yesterday, 09:15", items: 20, format: "JSON", summary: "Trending repos — name, stars, language, description cleaned and structured." },
-];
+type Job = {
+  id: string;
+  format: string;
+};
 
 export default function DataPage() {
-  const [selected, setSelected] = useState<string | null>(null);
+  const [results, setResults] = useState<Result[]>([]);
+  const [jobs, setJobs] = useState<Record<string, Job>>({});
+  const [selected, setSelected] = useState<Result | null>(null);
   const [exportFormat, setExportFormat] = useState("JSON");
+  const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("All");
+  const [showFilter, setShowFilter] = useState(false);
 
-  const filtered = MOCK_RESULTS.filter((r) =>
-    r.url.toLowerCase().includes(search.toLowerCase()) ||
-    r.summary.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => { fetchAll(); }, []);
 
-  const selectedResult = MOCK_RESULTS.find((r) => r.id === selected);
+  const fetchAll = async () => {
+    setLoading(true);
+    const { data: jobData } = await supabase.from("jobs").select("id, format");
+    if (jobData) {
+      const jobMap: Record<string, Job> = {};
+      jobData.forEach((j) => { jobMap[j.id] = j; });
+      setJobs(jobMap);
+    }
+    const { data: resultData } = await supabase
+      .from("results")
+      .select("*")
+      .eq("success", true)
+      .order("created_at", { ascending: false });
+    if (resultData) setResults(resultData);
+    setLoading(false);
+  };
+
+  const handleDelete = async (result: Result, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeleting(result.id);
+    await supabase.from("results").delete().eq("id", result.id);
+    setResults((prev) => prev.filter((r) => r.id !== result.id));
+    if (selected?.id === result.id) setSelected(null);
+    setDeleting(null);
+  };
+
+  const handleDownload = (result: Result) => {
+    const data = { url: result.url, title: result.title, links: result.links, cleaned: result.cleaned };
+    let content = "", mime = "application/json", ext = "json";
+    if (exportFormat === "JSON") { content = JSON.stringify(data, null, 2); }
+    else if (exportFormat === "CSV") { content = `url,title,cleaned\n"${data.url}","${data.title}","${data.cleaned}"`; mime = "text/csv"; ext = "csv"; }
+    else if (exportFormat === "TXT") { content = `URL: ${data.url}\nTitle: ${data.title}\nCleaned: ${data.cleaned}`; mime = "text/plain"; ext = "txt"; }
+    else if (exportFormat === "XML") { content = `<r><url>${data.url}</url><title>${data.title}</title><cleaned>${data.cleaned}</cleaned></r>`; mime = "application/xml"; ext = "xml"; }
+    else if (exportFormat === "HTML") { content = `<table><tr><td><b>URL</b></td><td>${data.url}</td></tr><tr><td><b>Title</b></td><td>${data.title}</td></tr><tr><td><b>Cleaned</b></td><td>${data.cleaned}</td></tr></table>`; mime = "text/html"; ext = "html"; }
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `phantomscrape-${result.id}.${ext}`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const filtered = results.filter((r) => {
+    const matchSearch = r.url.toLowerCase().includes(search.toLowerCase()) ||
+      (r.title && r.title.toLowerCase().includes(search.toLowerCase()));
+    const jobFormat = jobs[r.job_id]?.format?.toUpperCase() ?? "";
+    const matchFilter = filter === "All" || jobFormat === filter;
+    return matchSearch && matchFilter;
+  });
 
   return (
-    <div className="page">
-      <div className="page-header fade-up">
-        <p className="page-label">// data</p>
-        <h1 className="page-title">Scraped Data</h1>
-        <p className="page-sub">{MOCK_RESULTS.length} sessions stored. Select one to preview and export.</p>
+    <div className="max-w-5xl mx-auto px-4 py-10">
+      <div className="mb-8">
+        <p className="font-mono text-xs text-emerald-400 tracking-widest uppercase mb-1">// data</p>
+        <h1 className="text-4xl font-black text-white mb-2" style={{ fontFamily: "Syne, sans-serif" }}>Scraped Data</h1>
+        <p className="text-sm text-gray-500">{results.length} URL{results.length !== 1 ? "s" : ""} stored.</p>
       </div>
 
-      <div className="data-layout">
-        {/* Left: result list */}
-        <div className="results-panel fade-up" style={{ animationDelay: "0.1s" }}>
-          <div className="search-row">
+      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
+        {/* Left panel */}
+        <div className="bg-[#111] border border-emerald-900/20 rounded-lg overflow-hidden h-fit">
+          {/* Search + Filter */}
+          <div className="p-3 border-b border-emerald-900/20 flex gap-2">
             <input
-              className="search-input"
               type="text"
-              placeholder="Search results..."
+              placeholder="Search URL or title..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 bg-[#1a1a1a] border border-gray-800 rounded px-3 py-2 font-mono text-xs text-white placeholder-gray-700 outline-none focus:border-emerald-600 transition-colors"
             />
-          </div>
-          <div className="result-list">
-            {filtered.map((r, i) => (
-              <div
-                key={r.id}
-                className={`result-item ${selected === r.id ? "active" : ""}`}
-                onClick={() => setSelected(r.id)}
-                style={{ animationDelay: `${0.15 + i * 0.07}s` }}
+            <div className="relative">
+              <button
+                onClick={() => setShowFilter(!showFilter)}
+                className={`font-mono text-xs px-3 py-2 rounded border transition-colors ${
+                  filter !== "All"
+                    ? "bg-emerald-400/10 border-emerald-600 text-emerald-400"
+                    : "bg-[#1a1a1a] border-gray-800 text-gray-500 hover:text-emerald-400 hover:border-emerald-900"
+                }`}
               >
-                <div className="result-top">
-                  <span className="result-url">{r.url.replace("https://", "")}</span>
-                  <span className={`tag tag-success`}>{r.format}</span>
+                ⊟ {filter}
+              </button>
+              {showFilter && (
+                <div className="absolute right-0 top-full mt-1 bg-[#161616] border border-emerald-900/20 rounded-lg overflow-hidden z-10 w-28">
+                  {FILTERS.map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => { setFilter(f); setShowFilter(false); }}
+                      className={`w-full text-left px-3 py-2 font-mono text-xs transition-colors ${
+                        filter === f ? "text-emerald-400 bg-emerald-400/10" : "text-gray-500 hover:text-emerald-400 hover:bg-[#1a1a1a]"
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  ))}
                 </div>
-                <p className="result-summary">{r.summary}</p>
-                <div className="result-meta">
-                  <span>{r.scrapedAt}</span>
-                  <span>·</span>
-                  <span>{r.items} items</span>
+              )}
+            </div>
+          </div>
+
+          {/* Result rows */}
+          <div className="flex flex-col max-h-[600px] overflow-y-auto">
+            {loading ? (
+              <p className="font-mono text-xs text-gray-600 text-center py-8">Loading...</p>
+            ) : filtered.length === 0 ? (
+              <p className="font-mono text-xs text-gray-600 text-center py-8">No results found.</p>
+            ) : (
+              filtered.map((result) => (
+                <div
+                  key={result.id}
+                  onClick={() => setSelected(result)}
+                  className={`px-4 py-3 border-b border-emerald-900/10 last:border-0 cursor-pointer transition-colors ${
+                    selected?.id === result.id
+                      ? "bg-emerald-400/10 border-l-2 border-l-emerald-400"
+                      : "hover:bg-[#161616]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1 gap-2">
+                    <span className="font-mono text-xs text-white truncate max-w-[160px]">
+                      {result.url.replace("https://", "")}
+                    </span>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {jobs[result.job_id] && (
+                        <span className="font-mono text-[10px] bg-emerald-400/10 text-emerald-400 px-1.5 py-0.5 rounded">
+                          {jobs[result.job_id].format.toUpperCase()}
+                        </span>
+                      )}
+                      <button
+                        onClick={(e) => handleDelete(result, e)}
+                        disabled={deleting === result.id}
+                        className="font-mono text-[10px] text-gray-600 hover:text-red-400 border border-gray-800 hover:border-red-900 px-1.5 py-0.5 rounded transition-colors disabled:opacity-40"
+                      >
+                        {deleting === result.id ? "..." : "✕"}
+                      </button>
+                    </div>
+                  </div>
+                  {result.title && (
+                    <p className="font-mono text-[10px] text-gray-500 truncate">{result.title}</p>
+                  )}
+                  <p className="font-mono text-[10px] text-gray-700 mt-0.5">
+                    {new Date(result.created_at).toLocaleString()}
+                  </p>
                 </div>
-              </div>
-            ))}
-            {filtered.length === 0 && (
-              <p className="empty-state">No results match your search.</p>
+              ))
             )}
           </div>
         </div>
 
-        {/* Right: preview + export */}
-        <div className="preview-panel fade-up" style={{ animationDelay: "0.2s" }}>
-          {selectedResult ? (
+        {/* Right: preview */}
+        <div className="bg-[#111] border border-emerald-900/20 rounded-lg p-4 min-h-[400px]">
+          {!selected ? (
+            <div className="flex flex-col items-center justify-center h-64 gap-3 text-gray-700">
+              <span className="text-4xl">⬡</span>
+              <p className="font-mono text-xs">Select a URL to preview</p>
+            </div>
+          ) : (
             <>
-              <div className="preview-header">
-                <div>
-                  <p className="section-label">Preview</p>
-                  <p className="preview-url">{selectedResult.url}</p>
+              <div className="mb-4">
+                <p className="font-mono text-xs text-emerald-400 uppercase tracking-widest mb-1">Preview</p>
+                <p className="font-mono text-xs text-gray-500 truncate">{selected.url}</p>
+              </div>
+
+              {selected.title && (
+                <p className="text-base font-bold text-white mb-3" style={{ fontFamily: "Syne, sans-serif" }}>{selected.title}</p>
+              )}
+
+              <div className="bg-[#1a1a1a] border border-gray-800 rounded p-3 max-h-48 overflow-y-auto mb-4">
+                <pre className="font-mono text-xs text-gray-500 whitespace-pre-wrap">{selected.cleaned}</pre>
+              </div>
+
+              {selected.links?.length > 0 && (
+                <div className="mb-4">
+                  <p className="font-mono text-xs text-gray-600 uppercase tracking-widest mb-2">Links ({selected.links.length})</p>
+                  <div className="flex flex-col gap-1 max-h-24 overflow-y-auto">
+                    {selected.links.map((link, i) => (
+                      <a key={i} href={link} target="_blank" rel="noreferrer" className="font-mono text-xs text-emerald-400/70 hover:text-emerald-400 truncate transition-colors">
+                        {link}
+                      </a>
+                    ))}
+                  </div>
                 </div>
-                <span className="tag tag-success">{selectedResult.items} items</span>
-              </div>
-
-              {/* Mock JSON preview */}
-              <div className="code-block">
-                <pre>{`[
-  {
-    "title": "Ask HN: How do you stay focused?",
-    "score": 342,
-    "author": "throwaway_dev",
-    "comments": 198,
-    "url": "https://news.ycombinator.com/item?id=..."
-  },
-  {
-    "title": "Show HN: I built a scraper in Go",
-    "score": 211,
-    "author": "gopher42",
-    "comments": 87,
-    "url": "https://news.ycombinator.com/item?id=..."
-  }
-  // ... ${selectedResult.items - 2} more items
-]`}</pre>
-              </div>
-
-              {/* AI Summary */}
-              <div className="ai-summary">
-                <span className="ai-summary-label">◈ AI Summary</span>
-                <p>{selectedResult.summary}</p>
-              </div>
+              )}
 
               {/* Export */}
-              <div className="export-section">
-                <p className="section-label">Export As</p>
-                <div className="export-row">
-                  <div className="format-grid">
+              <div>
+                <p className="font-mono text-xs text-emerald-400 uppercase tracking-widest mb-3">Export As</p>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex flex-wrap gap-2">
                     {FORMATS.map((f) => (
                       <button
                         key={f}
-                        className={`format-btn ${exportFormat === f ? "active" : ""}`}
                         onClick={() => setExportFormat(f)}
+                        className={`font-mono text-xs px-3 py-1.5 rounded border transition-colors ${
+                          exportFormat === f
+                            ? "bg-emerald-400/10 border-emerald-500 text-emerald-400"
+                            : "bg-[#1a1a1a] border-gray-800 text-gray-500 hover:text-emerald-400 hover:border-emerald-900"
+                        }`}
                       >
                         {f}
                       </button>
                     ))}
                   </div>
-                  <button className="btn-primary">
+                  <button
+                    onClick={() => handleDownload(selected)}
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 bg-emerald-400 text-black font-mono text-xs font-medium px-4 py-2 rounded-lg hover:bg-emerald-300 transition-colors"
+                  >
                     ↓ Download {exportFormat}
                   </button>
                 </div>
               </div>
             </>
-          ) : (
-            <div className="empty-preview">
-              <span className="empty-icon">⬡</span>
-              <p>Select a result to preview and export</p>
-            </div>
           )}
         </div>
       </div>
-
-      <style jsx>{`
-        .page {
-          max-width: 1050px;
-          margin: 0 auto;
-          padding: 3rem 1.5rem 4rem;
-        }
-        .page-header { margin-bottom: 2rem; }
-        .page-label {
-          font-family: var(--font-mono);
-          font-size: 0.72rem;
-          color: var(--accent);
-          letter-spacing: 0.1em;
-          margin-bottom: 0.4rem;
-        }
-        .page-title {
-          font-family: var(--font-display);
-          font-size: 2rem;
-          font-weight: 800;
-          color: var(--text-primary);
-          letter-spacing: -0.03em;
-          margin-bottom: 0.5rem;
-        }
-        .page-sub {
-          font-size: 0.85rem;
-          color: var(--text-secondary);
-        }
-        .data-layout {
-          display: grid;
-          grid-template-columns: 340px 1fr;
-          gap: 1.25rem;
-          align-items: start;
-        }
-        .results-panel {
-          background: var(--bg-card);
-          border: 1px solid var(--border);
-          border-radius: var(--radius);
-          overflow: hidden;
-        }
-        .search-row {
-          padding: 0.75rem 1rem;
-          border-bottom: 1px solid var(--border);
-        }
-        .search-input {
-          width: 100%;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          padding: 0.5rem 0.8rem;
-          font-family: var(--font-mono);
-          font-size: 0.78rem;
-          color: var(--text-primary);
-          outline: none;
-          transition: border-color 0.2s;
-        }
-        .search-input:focus { border-color: var(--accent); }
-        .search-input::placeholder { color: var(--text-muted); }
-        .result-list {
-          display: flex;
-          flex-direction: column;
-        }
-        .result-item {
-          padding: 1rem;
-          border-bottom: 1px solid var(--border);
-          cursor: pointer;
-          transition: background 0.15s;
-          animation: fadeUp 0.4s ease forwards;
-          opacity: 0;
-        }
-        .result-item:last-child { border-bottom: none; }
-        .result-item:hover { background: var(--bg-elevated); }
-        .result-item.active {
-          background: var(--accent-dim);
-          border-left: 2px solid var(--accent);
-        }
-        .result-top {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 0.4rem;
-        }
-        .result-url {
-          font-family: var(--font-mono);
-          font-size: 0.78rem;
-          color: var(--text-primary);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          max-width: 200px;
-        }
-        .result-summary {
-          font-size: 0.75rem;
-          color: var(--text-muted);
-          line-height: 1.5;
-          margin-bottom: 0.5rem;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-        .result-meta {
-          display: flex;
-          gap: 0.4rem;
-          font-family: var(--font-mono);
-          font-size: 0.68rem;
-          color: var(--text-muted);
-        }
-        .empty-state {
-          padding: 2rem;
-          text-align: center;
-          font-size: 0.8rem;
-          color: var(--text-muted);
-        }
-        .preview-panel {
-          background: var(--bg-card);
-          border: 1px solid var(--border);
-          border-radius: var(--radius);
-          padding: 1.5rem;
-          min-height: 400px;
-        }
-        .preview-header {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          margin-bottom: 1.25rem;
-        }
-        .section-label {
-          font-family: var(--font-mono);
-          font-size: 0.68rem;
-          color: var(--accent);
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          margin-bottom: 0.3rem;
-        }
-        .preview-url {
-          font-family: var(--font-mono);
-          font-size: 0.82rem;
-          color: var(--text-secondary);
-        }
-        .code-block {
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          padding: 1rem;
-          margin-bottom: 1rem;
-          overflow-x: auto;
-        }
-        .code-block pre {
-          font-family: var(--font-mono);
-          font-size: 0.76rem;
-          color: var(--text-secondary);
-          line-height: 1.7;
-          white-space: pre;
-        }
-        .ai-summary {
-          background: linear-gradient(135deg, var(--bg-elevated), rgba(16,185,129,0.04));
-          border: 1px solid rgba(16,185,129,0.15);
-          border-radius: 6px;
-          padding: 0.9rem 1rem;
-          margin-bottom: 1.25rem;
-        }
-        .ai-summary-label {
-          display: block;
-          font-family: var(--font-mono);
-          font-size: 0.68rem;
-          color: var(--accent);
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          margin-bottom: 0.4rem;
-        }
-        .ai-summary p {
-          font-size: 0.8rem;
-          color: var(--text-secondary);
-          line-height: 1.6;
-        }
-        .export-section { margin-top: 1rem; }
-        .export-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 1rem;
-          margin-top: 0.75rem;
-          flex-wrap: wrap;
-        }
-        .format-grid {
-          display: flex;
-          gap: 0.4rem;
-          flex-wrap: wrap;
-        }
-        .format-btn {
-          padding: 0.35rem 0.8rem;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          font-family: var(--font-mono);
-          font-size: 0.72rem;
-          color: var(--text-secondary);
-          cursor: pointer;
-          letter-spacing: 0.06em;
-          transition: all 0.2s;
-        }
-        .format-btn:hover { color: var(--accent); border-color: var(--border-hover); }
-        .format-btn.active {
-          background: var(--accent-dim);
-          border-color: var(--accent);
-          color: var(--accent);
-        }
-        .empty-preview {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          height: 300px;
-          gap: 1rem;
-          color: var(--text-muted);
-        }
-        .empty-icon {
-          font-size: 2.5rem;
-          color: rgba(16,185,129,0.2);
-        }
-        .empty-preview p {
-          font-family: var(--font-mono);
-          font-size: 0.8rem;
-        }
-      `}</style>
     </div>
   );
 }

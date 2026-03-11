@@ -17,3 +17,11 @@ export async function scrapeBulk(urls: string[], throttle: number, format: strin
     })
     return res.json()
 }
+
+export async function deleteJob(jobId: string) {
+  const { error } = await supabase
+    .from("jobs")
+    .delete()
+    .eq("id", jobId)
+  return !error
+}
